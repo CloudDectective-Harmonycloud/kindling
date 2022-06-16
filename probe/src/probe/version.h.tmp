@@ -1,0 +1,3 @@
+#ifndef _VERSION_
+#define _VERSION_ "MYVERSION"
+#endif

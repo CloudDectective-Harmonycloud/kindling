@@ -12,6 +12,9 @@
 #include "src/common/base/base.h"
 #include "src/probe/catch_sig.h"
 
+#include "src/probe/version.h"
+#include <ctime>
+#include <string>
 
 DEFINE_int32(sysdig_snaplen, 80, "The len of one sysdig event");
 DEFINE_int32(list_batch_size, 100, "The batch size of convert/send list");
@@ -20,7 +23,7 @@ DEFINE_bool(sysdig_output, false, "If true, sysdig will print events log");
 DEFINE_int32(sysdig_filter_out_pid_event, -1, "When sysdig_output is true, sysdig will print the exact process's events");
 DEFINE_bool(sysdig_bpf, true, "If true, sysdig will use eBPF mode");
 
-#define KINDLING_PROBE_VERSION "v0.1-2021-1221"
+
 void do_inspect(sinsp *inspector, sinsp_evt_formatter *formatter, int pid, publisher* pub) {
     int32_t res;
     sinsp_evt *ev;
@@ -107,7 +110,9 @@ int main(int argc, char** argv) {
     output_format = "*%evt.num %evt.outputtime %evt.cpu %container.name (%container.id) %proc.name (%thread.tid:%thread.vtid) %evt.dir %evt.type %evt.info";
 
     LOG(INFO) << "Start kindling probe...";
-    LOG(INFO) << "KINDLING_PROBE_VERSION: " << KINDLING_PROBE_VERSION;
+    LOG(INFO) << "KINDLING_PROBE_"<< _VERSION_ ;
+    std::cout << "KINDLING_PROBE_"<< _VERSION_ << std::endl;
+
     TerminationHandler::InstallSignalHandlers();
     try {
         inspector = new sinsp();
