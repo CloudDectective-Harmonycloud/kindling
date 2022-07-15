@@ -63,8 +63,38 @@ func (r *CgoReceiver) Start() error {
 	// Wait for the C routine running
 	time.Sleep(2 * time.Second)
 	go r.consumeEvents()
+	r.initPageFaultEvent()
 	go r.startGetEvent()
 	return nil
+}
+
+func (r *CgoReceiver) initPageFaultEvent() {
+	var PageFaultEnabled bool = false
+	for _, value := range r.cfg.SubscribeInfo {
+		if value.Name == "tracepoint-page_fault" {
+			PageFaultEnabled = true
+			break
+		}
+	}
+
+	if !PageFaultEnabled {
+		return
+	}
+
+	pageCnt := 0
+	for {
+		var pKindlingEvent unsafe.Pointer
+		res := int(C.getPageFaultInitEvent(&pKindlingEvent))
+		if res == -1 {
+			break
+		}
+		pageCnt++
+		event := convertEvent((*CKindlingEventForGo)(pKindlingEvent))
+		r.eventChannel <- event
+		r.stats.add(event.Name, 1)
+	}
+	r.telemetry.Logger.Info("pagefault init:", zap.Int("the total number of init pagefault threads", pageCnt))
+
 }
 
 func (r *CgoReceiver) startGetEvent() {

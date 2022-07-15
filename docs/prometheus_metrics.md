@@ -257,6 +257,28 @@ We made some rules for considering whether a request is abnormal. For the abnorm
 
 **Note 3**: The field `pid` and `comm` will not exist if you set `need_process_info` to `false` (default is false), that will reduce the pressure of Prometheus.
 
+## Page Fault Metrics
+### Metrics List
+| **Metric Name** | **Type** | **Description** |
+| --- | --- | --- |
+| `kindling_pagefault_major_total` | Gauge | Total number of major page faults|
+| `kindling_pagefault_minor_total` | Gauge | Total number of minor page faults|
+
+### Labels List
+| **Label Name** | **Example** | **Notes** |
+| --- | --- | --- |
+| `node` | worker-1 | Node name represented in Kubernetes cluster |
+| `namespace` | default | Namespace of the pod |
+| `workload_kind` | daemonset | K8sResourceType |
+| `workload_name` | api-ds | K8sResourceName |
+| `service` | api | One of the services that target this pod |
+| `pod` | api-ds-xxxx | The name of the pod |
+| `container` | api-container | The name of the container |
+| `container_id` | 1a2b3c4d5e6f | The shorten container id which contains 12 characters |
+| `ip` | 10.1.11.23 | The IP address of the entity |
+| `tid` | 1213 | The thread tid of page fault occurred |
+| `pid` | 1234 | The process pid of page fault occurred |
+
 ## PromQL Example
 Here are some examples of how to use these metrics in Prometheus, which can help you understand them faster.
 

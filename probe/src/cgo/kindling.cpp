@@ -7,14 +7,14 @@
 #include "sinsp_capture_interrupt_exception.h"
 #include <iostream>
 #include <cstdlib>
-#include <stdlib.h>
+#include <chrono>
 
 static sinsp *inspector = nullptr;
 sinsp_evt_formatter *formatter = nullptr;
 bool printEvent = false;
-int cnt = 0;
 map<string, ppm_event_type> m_events;
 map<string, Category> m_categories;
+unordered_map<int64_t, threadinfo_map_t::ptr_t> threadstable;
 int16_t event_filters[1024][16];
 
 void init_sub_label()
@@ -38,10 +38,16 @@ void init_sub_label()
 
 void sub_event(char *eventName, char *category)
 {
-	cout << "sub event name:" << eventName << "  &&  category:" << category << endl;
+	cout << "sub event name: " << eventName << "  &&  category: " << category << endl;
 	auto it_type = m_events.find(eventName);
 	if(it_type != m_events.end())
 	{
+		if(it_type->second == PPME_PAGE_FAULT_E){
+			inspector->enable_page_faults();
+			inspector->set_eventmask(PPME_PAGE_FAULT_X);
+			inspector->set_eventmask(PPME_PAGE_FAULT_E);
+			initPageFaultOffData();
+		}
 		if(category == nullptr || category[0] == '\0')
 		{
 			for(int j = 0; j < 16; j++)
@@ -133,6 +139,95 @@ void init_probe()
 	}
 }
 
+/* convert process information to main thread information.
+	The page fault data we want is limited to thread granularity.*/
+void convertThreadsTable(){
+	unordered_map<int64_t, int64_t> maj_mp, min_mp; //from pid to maj or min value
+	
+	for(auto e: threadstable){
+		sinsp_threadinfo* tmp = e.second.get();
+        if(tmp->m_pid == tmp->m_tid) continue;
+        maj_mp[tmp->m_pid] += tmp->m_pfmajor;
+        min_mp[tmp->m_pid] += tmp->m_pfminor;
+	}
+    for(auto e: min_mp){
+        auto tmp = threadstable.find(e.first);
+        sinsp_threadinfo* temp = inspector->build_threadinfo();
+        temp->m_pid = temp->m_tid = e.first;
+        temp->m_pfminor = tmp->second->m_pfminor - e.second;
+        temp->m_pfmajor = tmp->second->m_pfmajor - maj_mp[e.first];
+        threadstable[temp->m_tid] = threadinfo_map_t::ptr_t(temp);
+    }
+	cout << "total number of threads initialized is " << threadstable.size() << endl;
+}
+
+int getPageFaultThreadEvent(void **pp_kindling_event){
+	static unordered_map<int64_t, threadinfo_map_t::ptr_t>::iterator it = threadstable.begin();
+	if(it == threadstable.end()){
+		return -1;
+	}
+	sinsp_threadinfo* threadInfo = it->second.get();
+	it++;
+	kindling_event_t_for_go *p_kindling_event;
+	if(nullptr == *pp_kindling_event)
+	{
+		*pp_kindling_event = (kindling_event_t_for_go *)malloc(sizeof(kindling_event_t_for_go));
+		p_kindling_event = (kindling_event_t_for_go *)*pp_kindling_event;
+
+		p_kindling_event->name = (char *)malloc(sizeof(char) * 1024);
+		p_kindling_event->context.tinfo.comm = (char *)malloc(sizeof(char) * 256);
+		p_kindling_event->context.tinfo.containerId = (char *)malloc(sizeof(char) * 256);
+		p_kindling_event->context.fdInfo.filename = (char *)malloc(sizeof(char) * 1024);
+		p_kindling_event->context.fdInfo.directory = (char *)malloc(sizeof(char) * 1024);
+
+		for(int i = 0; i < 2; i++)
+		{
+			p_kindling_event->userAttributes[i].key = (char *)malloc(sizeof(char) * 128);
+			p_kindling_event->userAttributes[i].value = (char *)malloc(sizeof(char) * 1024);
+		}
+	}
+	p_kindling_event = (kindling_event_t_for_go *)*pp_kindling_event;
+
+	chrono::nanoseconds ns = std::chrono::duration_cast< std::chrono::nanoseconds>(
+		std::chrono::system_clock::now().time_since_epoch()
+	);
+	p_kindling_event->timestamp = ns.count();
+
+	p_kindling_event->context.tinfo.pid = threadInfo->m_pid;
+	p_kindling_event->context.tinfo.tid = threadInfo->m_tid;
+	p_kindling_event->context.tinfo.uid = threadInfo->m_uid;
+	p_kindling_event->context.tinfo.gid = threadInfo->m_gid;
+
+	strcpy(p_kindling_event->userAttributes[0].key, "pgft_maj");
+	memcpy(p_kindling_event->userAttributes[0].value, &threadInfo->m_pfmajor, 8);
+	p_kindling_event->userAttributes[0].valueType = UINT64;
+	p_kindling_event->userAttributes[0].len = 8;
+
+	strcpy(p_kindling_event->userAttributes[1].key, "pgft_min");
+	memcpy(p_kindling_event->userAttributes[1].value, &threadInfo->m_pfminor, 8);
+	p_kindling_event->userAttributes[1].valueType = UINT64;
+	p_kindling_event->userAttributes[1].len = 8;
+
+	p_kindling_event->paramsNumber = 2;
+	strcpy(p_kindling_event->context.tinfo.comm, (char *)threadInfo->m_comm.data());
+	strcpy(p_kindling_event->context.tinfo.containerId, (char *)threadInfo->m_container_id.data());
+	strcpy(p_kindling_event->name, "page_fault");
+
+	return 1;
+}
+
+void initPageFaultOffData(){
+	threadinfo_map_t *threadsmap = inspector->m_thread_manager->get_threads();
+    threadstable = threadsmap->getThreadsTable();
+
+	convertThreadsTable();
+
+	for(auto e: threadstable){
+		sinsp_threadinfo* tmp = e.second.get();
+        inspector->update_pagefaults_threads_number(tmp->m_tid, tmp->m_pfmajor);
+	}
+	inspector->update_pagefaults_threads_number(-1, threadstable.size());
+}
 int getEvent(void **pp_kindling_event)
 {
 	int32_t res;
@@ -150,6 +245,13 @@ int getEvent(void **pp_kindling_event)
 	   ev->get_category() & EC_INTERNAL)
 	{
 		return -1;
+	}
+	if(ev->get_type() == PPME_PAGE_FAULT_E){
+		int num = inspector->get_pagefault_threads_number();
+		if(num >= 1e6){
+			cout << "clear the page fault map with " << num << " threads..." << endl;
+			inspector->clear_page_faults_map();
+		}
 	}
 	auto threadInfo = ev->get_thread_info();
 	if(threadInfo == nullptr)
@@ -269,89 +371,89 @@ int getEvent(void **pp_kindling_event)
 	userAttNumber++;
 	switch(ev->get_type())
 	{
-	case PPME_TCP_RCV_ESTABLISHED_E:
-	case PPME_TCP_CLOSE_E:
-	{
-		auto pTuple = ev->get_param_value_raw("tuple");
-		userAttNumber = setTuple(p_kindling_event, pTuple, userAttNumber);
+		case PPME_TCP_RCV_ESTABLISHED_E:
+		case PPME_TCP_CLOSE_E:
+		{
+			auto pTuple = ev->get_param_value_raw("tuple");
+			userAttNumber = setTuple(p_kindling_event, pTuple, userAttNumber);
 
-		auto pRtt = ev->get_param_value_raw("srtt");
-		if(pRtt != NULL)
-		{
-			strcpy(p_kindling_event->userAttributes[userAttNumber].key, "rtt");
-			memcpy(p_kindling_event->userAttributes[userAttNumber].value, pRtt->m_val, pRtt->m_len);
-			p_kindling_event->userAttributes[userAttNumber].valueType = UINT32;
-			p_kindling_event->userAttributes[userAttNumber].len = pRtt->m_len;
-			userAttNumber++;
+			auto pRtt = ev->get_param_value_raw("srtt");
+			if(pRtt != NULL)
+			{
+				strcpy(p_kindling_event->userAttributes[userAttNumber].key, "rtt");
+				memcpy(p_kindling_event->userAttributes[userAttNumber].value, pRtt->m_val, pRtt->m_len);
+				p_kindling_event->userAttributes[userAttNumber].valueType = UINT32;
+				p_kindling_event->userAttributes[userAttNumber].len = pRtt->m_len;
+				userAttNumber++;
+			}
+			break;
 		}
-		break;
-	}
-	case PPME_TCP_CONNECT_X:
-	{
-		auto pTuple = ev->get_param_value_raw("tuple");
-		userAttNumber = setTuple(p_kindling_event, pTuple, userAttNumber);
-		auto pRetVal = ev->get_param_value_raw("retval");
-		if(pRetVal != NULL)
+		case PPME_TCP_CONNECT_X:
 		{
-			strcpy(p_kindling_event->userAttributes[userAttNumber].key, "retval");
-			memcpy(p_kindling_event->userAttributes[userAttNumber].value, pRetVal->m_val, pRetVal->m_len);
-			p_kindling_event->userAttributes[userAttNumber].valueType = UINT64;
-			p_kindling_event->userAttributes[userAttNumber].len = pRetVal->m_len;
-			userAttNumber++;
+			auto pTuple = ev->get_param_value_raw("tuple");
+			userAttNumber = setTuple(p_kindling_event, pTuple, userAttNumber);
+			auto pRetVal = ev->get_param_value_raw("retval");
+			if(pRetVal != NULL)
+			{
+				strcpy(p_kindling_event->userAttributes[userAttNumber].key, "retval");
+				memcpy(p_kindling_event->userAttributes[userAttNumber].value, pRetVal->m_val, pRetVal->m_len);
+				p_kindling_event->userAttributes[userAttNumber].valueType = UINT64;
+				p_kindling_event->userAttributes[userAttNumber].len = pRetVal->m_len;
+				userAttNumber++;
+			}
+			break;
 		}
-		break;
-	}
-	case PPME_TCP_DROP_E:
-	case PPME_TCP_RETRANCESMIT_SKB_E:
-	case PPME_TCP_SET_STATE_E:
-	{
-		auto pTuple = ev->get_param_value_raw("tuple");
-		userAttNumber = setTuple(p_kindling_event, pTuple, userAttNumber);
-		auto old_state = ev->get_param_value_raw("old_state");
-		if(old_state != NULL)
+		case PPME_TCP_DROP_E:
+		case PPME_TCP_RETRANCESMIT_SKB_E:
+		case PPME_TCP_SET_STATE_E:
 		{
-			strcpy(p_kindling_event->userAttributes[userAttNumber].key, "old_state");
-			memcpy(p_kindling_event->userAttributes[userAttNumber].value, old_state->m_val, old_state->m_len);
-			p_kindling_event->userAttributes[userAttNumber].len = old_state->m_len;
-			p_kindling_event->userAttributes[userAttNumber].valueType = INT32;
-			userAttNumber++;
+			auto pTuple = ev->get_param_value_raw("tuple");
+			userAttNumber = setTuple(p_kindling_event, pTuple, userAttNumber);
+			auto old_state = ev->get_param_value_raw("old_state");
+			if(old_state != NULL)
+			{
+				strcpy(p_kindling_event->userAttributes[userAttNumber].key, "old_state");
+				memcpy(p_kindling_event->userAttributes[userAttNumber].value, old_state->m_val, old_state->m_len);
+				p_kindling_event->userAttributes[userAttNumber].len = old_state->m_len;
+				p_kindling_event->userAttributes[userAttNumber].valueType = INT32;
+				userAttNumber++;
+			}
+			auto new_state = ev->get_param_value_raw("new_state");
+			if(new_state != NULL)
+			{
+				strcpy(p_kindling_event->userAttributes[userAttNumber].key, "new_state");
+				memcpy(p_kindling_event->userAttributes[userAttNumber].value, new_state->m_val, new_state->m_len);
+				p_kindling_event->userAttributes[userAttNumber].valueType = INT32;
+				p_kindling_event->userAttributes[userAttNumber].len = new_state->m_len;
+				userAttNumber++;
+			}
+			break;
 		}
-		auto new_state = ev->get_param_value_raw("new_state");
-		if(new_state != NULL)
+		case PPME_TCP_SEND_RESET_E:
+		case PPME_TCP_RECEIVE_RESET_E:
 		{
-			strcpy(p_kindling_event->userAttributes[userAttNumber].key, "new_state");
-			memcpy(p_kindling_event->userAttributes[userAttNumber].value, new_state->m_val, new_state->m_len);
-			p_kindling_event->userAttributes[userAttNumber].valueType = INT32;
-			p_kindling_event->userAttributes[userAttNumber].len = new_state->m_len;
-			userAttNumber++;
+			auto pTuple = ev->get_param_value_raw("tuple");
+			userAttNumber = setTuple(p_kindling_event, pTuple, userAttNumber);
+			break;
 		}
-		break;
-	}
-	case PPME_TCP_SEND_RESET_E:
-	case PPME_TCP_RECEIVE_RESET_E:
-	{
-		auto pTuple = ev->get_param_value_raw("tuple");
-		userAttNumber = setTuple(p_kindling_event, pTuple, userAttNumber);
-		break;
-	}
-	default:
-	{
-		uint16_t paramsNumber = ev->get_num_params();
-		if(paramsNumber > 8)
+		default:
 		{
-			paramsNumber = 8;
-		}
-		for(auto i = 0; i < paramsNumber; i++)
-		{
+			uint16_t paramsNumber = ev->get_num_params();
+			if(paramsNumber > 8)
+			{
+				paramsNumber = 8;
+			}
+			for(auto i = 0; i < paramsNumber; i++)
+			{
 
-			strcpy(p_kindling_event->userAttributes[userAttNumber].key, (char *)ev->get_param_name(i));
-			memcpy(p_kindling_event->userAttributes[userAttNumber].value, ev->get_param(i)->m_val,
-			       ev->get_param(i)->m_len);
-			p_kindling_event->userAttributes[userAttNumber].len = ev->get_param(i)->m_len;
-			p_kindling_event->userAttributes[userAttNumber].valueType = get_type(ev->get_param_info(i)->type);
-			userAttNumber++;
+				strcpy(p_kindling_event->userAttributes[userAttNumber].key, (char *)ev->get_param_name(i));
+				memcpy(p_kindling_event->userAttributes[userAttNumber].value, ev->get_param(i)->m_val,
+				       ev->get_param(i)->m_len);
+				p_kindling_event->userAttributes[userAttNumber].len = ev->get_param(i)->m_len;
+				p_kindling_event->userAttributes[userAttNumber].valueType = get_type(ev->get_param_info(i)->type);
+				userAttNumber++;
+			}
 		}
-	}
 	}
 	p_kindling_event->paramsNumber = userAttNumber;
 	strcpy(p_kindling_event->name, (char *)ev->get_name());

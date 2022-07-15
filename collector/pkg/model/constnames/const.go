@@ -11,6 +11,8 @@ const (
 	RecvMsgEvent  = "recvmsg"
 	ConnectEvent  = "connect"
 
+	PageFaultEvent = "page_fault"
+
 	TcpCloseEvent          = "tcp_close"
 	TcpRcvEstablishedEvent = "tcp_rcv_established"
 	TcpDropEvent           = "tcp_drop"
@@ -26,8 +28,8 @@ const (
 	SingleNetRequestMetricGroup = "single_net_request_metric_group"
 	// AggregatedNetRequestMetricGroup stands for the dataGroup after aggregation.
 	AggregatedNetRequestMetricGroup = "aggregated_net_request_metric_group"
-
-	TcpMetricGroupName        = "tcp_metric_metric_group"
-	NodeMetricGroupName       = "node_metric_metric_group"
-	TcpConnectMetricGroupName = "tcp_connect_metric_group"
+	TcpMetricGroupName              = "tcp_metric_metric_group"
+	NodeMetricGroupName             = "node_metric_metric_group"
+	TcpConnectMetricGroupName       = "tcp_connect_metric_group"
+	PgftMetricGroupName             = "pgft_metric_metric_group"
 )

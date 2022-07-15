@@ -14,6 +14,9 @@ int getKindlingEvent(void **kindlingEvent){
 	return getEvent(kindlingEvent);
 }
 
+int getPageFaultInitEvent(void **kindlingEvent){
+	return getPageFaultThreadEvent(kindlingEvent);
+}
 
 void subEventForGo(char* eventName, char* category){
 	sub_event(eventName, category);

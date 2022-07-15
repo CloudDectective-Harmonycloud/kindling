@@ -7,6 +7,11 @@
 #include "sinsp.h"
 
 void init_probe();
+/* convert process information to main thread information.
+	The page fault data we want is limited to thread granularity.*/
+void convertThreadsTable();
+void initPageFaultOffData();
+int getPageFaultThreadEvent(void **kindlingEvent);
 int getEvent(void **kindlingEvent);
 uint16_t get_kindling_category(sinsp_evt *sEvt);
 void init_sub_label();
@@ -367,6 +372,7 @@ const static event kindling_to_sysdig[PPM_EVENT_MAX] = {
 	{"kprobe-tcp_set_state",            PPME_TCP_SET_STATE_E},
 	{"tracepoint-tcp_send_reset",       PPME_TCP_SEND_RESET_E},
 	{"tracepoint-tcp_receive_reset",    PPME_TCP_RECEIVE_RESET_E},
+	{"tracepoint-page_fault",           PPME_PAGE_FAULT_E},
 };
 
 struct event_category {

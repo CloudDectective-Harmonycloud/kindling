@@ -30,6 +30,7 @@ type AggregateProcessor struct {
 	aggregator               aggregator.Aggregator
 	netRequestLabelSelectors *aggregator.LabelSelectors
 	tcpLabelSelectors        *aggregator.LabelSelectors
+	pgftLabelSelectors       *aggregator.LabelSelectors
 	stopCh                   chan struct{}
 	ticker                   *time.Ticker
 }
@@ -44,6 +45,7 @@ func New(config interface{}, telemetry *component.TelemetryTools, nextConsumer c
 		aggregator:               defaultaggregator.NewDefaultAggregator(toAggregatedConfig(cfg.AggregateKindMap)),
 		netRequestLabelSelectors: newNetRequestLabelSelectors(),
 		tcpLabelSelectors:        newTcpLabelSelectors(),
+		pgftLabelSelectors:       newPgftLabelSelectors(),
 		stopCh:                   make(chan struct{}),
 		ticker:                   time.NewTicker(time.Duration(cfg.TickerInterval) * time.Second),
 	}
@@ -128,6 +130,10 @@ func (p *AggregateProcessor) Consume(dataGroup *model.DataGroup) error {
 	case constnames.TcpConnectMetricGroupName:
 		p.aggregator.Aggregate(dataGroup, tcpConnectLabelSelectors)
 		return nil
+	case constnames.PgftMetricGroupName:
+		//p.nextConsumer.Consume(dataGroup)
+		p.aggregator.Aggregate(dataGroup, p.pgftLabelSelectors)
+		return nil
 	default:
 		p.aggregator.Aggregate(dataGroup, p.netRequestLabelSelectors)
 		return nil
@@ -176,7 +182,21 @@ func newNetRequestLabelSelectors() *aggregator.LabelSelectors {
 		aggregator.LabelSelector{Name: constlabels.KafkaTopic, VType: aggregator.StringType},
 	)
 }
-
+func newPgftLabelSelectors() *aggregator.LabelSelectors {
+	return aggregator.NewLabelSelectors(
+		aggregator.LabelSelector{Name: constlabels.WorkloadKind, VType: aggregator.StringType},
+		aggregator.LabelSelector{Name: constlabels.WorkloadName, VType: aggregator.StringType},
+		aggregator.LabelSelector{Name: constlabels.Pod, VType: aggregator.StringType},
+		aggregator.LabelSelector{Name: constlabels.Ip, VType: aggregator.StringType},
+		aggregator.LabelSelector{Name: constlabels.Service, VType: aggregator.StringType},
+		aggregator.LabelSelector{Name: constlabels.Node, VType: aggregator.StringType},
+		aggregator.LabelSelector{Name: constlabels.Namespace, VType: aggregator.StringType},
+		aggregator.LabelSelector{Name: constlabels.Tid, VType: aggregator.IntType},
+		aggregator.LabelSelector{Name: constlabels.Pid, VType: aggregator.IntType},
+		aggregator.LabelSelector{Name: constlabels.ContainerId, VType: aggregator.StringType},
+		aggregator.LabelSelector{Name: constlabels.Container, VType: aggregator.StringType},
+	)
+}
 func newTcpLabelSelectors() *aggregator.LabelSelectors {
 	return aggregator.NewLabelSelectors(
 		aggregator.LabelSelector{Name: constlabels.SrcNode, VType: aggregator.StringType},

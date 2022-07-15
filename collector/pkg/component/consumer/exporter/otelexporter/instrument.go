@@ -31,6 +31,7 @@ type instrumentFactory struct {
 
 	traceAsMetricSelector *aggregator.LabelSelectors
 	TcpRttMillsSelector   *aggregator.LabelSelectors
+	PgftMetricsSelector   *aggregator.LabelSelectors
 }
 
 func newInstrumentFactory(meter metric.Meter, logger *zap.Logger, customLabels []attribute.KeyValue) *instrumentFactory {
@@ -47,11 +48,18 @@ func newInstrumentFactory(meter metric.Meter, logger *zap.Logger, customLabels [
 				constnames.TraceAsMetric: {
 					{Kind: defaultaggregator.LastKind, OutputName: constnames.TraceAsMetric},
 				},
+				constnames.PgftMajorMetricName: {
+					{Kind: defaultaggregator.LastKind, OutputName: constnames.PgftMajorMetricName},
+				},
+				constnames.PgftMinorMetricName: {
+					{Kind: defaultaggregator.LastKind, OutputName: constnames.PgftMinorMetricName},
+				},
 			},
 		}),
 
 		traceAsMetricSelector: newTraceAsMetricSelectors(),
 		TcpRttMillsSelector:   newTcpRttMicroSecondsSelectors(),
+		PgftMetricsSelector:   newPgftLabelSelectors(),
 	}
 }
 func (i *instrumentFactory) getInstrument(metricName string, kind MetricAggregationKind) instrument {
@@ -102,6 +110,7 @@ func (i *instrumentFactory) recordLastValue(metricName string, singleMetric *mod
 	}
 }
 
+
 func WithDescription(metricName string) metric.InstrumentOption {
 	var option metric.InstrumentOption
 	switch metricName {
@@ -119,9 +128,29 @@ func (i *instrumentFactory) getSelector(metricName string) *aggregator.LabelSele
 		return i.traceAsMetricSelector
 	case constnames.TcpRttMetricName:
 		return i.TcpRttMillsSelector
+	case constnames.PgftMajorMetricName:
+		return i.PgftMetricsSelector
+	case constnames.PgftMinorMetricName:
+		return i.PgftMetricsSelector
 	default:
 		return nil
 	}
+}
+
+func newPgftLabelSelectors() *aggregator.LabelSelectors {
+	return aggregator.NewLabelSelectors(
+		aggregator.LabelSelector{Name: constlabels.WorkloadKind, VType: aggregator.StringType},
+		aggregator.LabelSelector{Name: constlabels.WorkloadName, VType: aggregator.StringType},
+		aggregator.LabelSelector{Name: constlabels.Pod, VType: aggregator.StringType},
+		aggregator.LabelSelector{Name: constlabels.Ip, VType: aggregator.StringType},
+		aggregator.LabelSelector{Name: constlabels.Service, VType: aggregator.StringType},
+		aggregator.LabelSelector{Name: constlabels.Node, VType: aggregator.StringType},
+		aggregator.LabelSelector{Name: constlabels.Namespace, VType: aggregator.StringType},
+		aggregator.LabelSelector{Name: constlabels.Tid, VType: aggregator.IntType},
+		aggregator.LabelSelector{Name: constlabels.Pid, VType: aggregator.IntType},
+		aggregator.LabelSelector{Name: constlabels.ContainerId, VType: aggregator.StringType},
+		aggregator.LabelSelector{Name: constlabels.Container, VType: aggregator.StringType},
+	)
 }
 
 func newTraceAsMetricSelectors() *aggregator.LabelSelectors {

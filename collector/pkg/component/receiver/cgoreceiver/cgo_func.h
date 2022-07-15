@@ -10,6 +10,7 @@ extern "C" {
 #endif
 void runForGo();
 int getKindlingEvent(void **kindlingEvent);
+int getPageFaultInitEvent(void **kindlingEvent);
 int subEventForGo(char* eventName, char* category);
 #ifdef __cplusplus
 }
