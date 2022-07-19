@@ -39,13 +39,13 @@ func (n *NetMetricGroupAdapter) dealWithSingleMetricGroup(dataGroup *model.DataG
 	results := make([]*AdaptedResult, 0, 2)
 	if n.StoreTraceAsMetric {
 		// Since TraceAsMetric has to be aggregated again, the attrType of TraceAsMetric must be `AttributeMap`
-		results = append(results, createResult(
+		results = append(results, createMetric(
 			[]*model.Metric{model.NewMetric(constnames.TraceAsMetric, requestTotalTime.GetData())},
 			dataGroup, n.traceToMetricAdapter,
 			AttributeMap))
 	}
 	if n.StoreTraceAsSpan {
-		results = append(results, createResult([]*model.Metric{requestTotalTime}, dataGroup, n.traceToSpanAdapter, attrType))
+		results = append(results, createTrace([]*model.Metric{requestTotalTime}, dataGroup, n.traceToSpanAdapter, attrType))
 	}
 	return results
 }
@@ -92,15 +92,15 @@ func (n *NetMetricGroupAdapter) createNetMetricResults(dataGroup *model.DataGrou
 	}
 	tmpResults = make([]*AdaptedResult, 0, 2)
 	if len(metricsExceptRequestCount) > 0 {
-		tmpResults = append(tmpResults, createResult(metricsExceptRequestCount, dataGroup, adapter[0], attrType))
+		tmpResults = append(tmpResults, createMetric(metricsExceptRequestCount, dataGroup, adapter[0], attrType))
 	}
 	if len(requestCount) > 0 {
-		tmpResults = append(tmpResults, createResult(requestCount, dataGroup, adapter[1], attrType))
+		tmpResults = append(tmpResults, createMetric(requestCount, dataGroup, adapter[1], attrType))
 	}
 	return
 }
 
-func createResult(metrics []*model.Metric, dataGroup *model.DataGroup, adapter *LabelConverter, addrType AttrType) *AdaptedResult {
+func createMetric(metrics []*model.Metric, dataGroup *model.DataGroup, adapter *LabelConverter, addrType AttrType) *AdaptedResult {
 	switch addrType {
 	case AttributeMap:
 		attrs, free := adapter.transform(dataGroup)
@@ -115,6 +115,30 @@ func createResult(metrics []*model.Metric, dataGroup *model.DataGroup, adapter *
 		attrs, free := adapter.convert(dataGroup)
 		return &AdaptedResult{
 			ResultType:    Metric,
+			AttrsList:     attrs,
+			Metrics:       metrics,
+			Timestamp:     dataGroup.Timestamp,
+			FreeAttrsList: free,
+		}
+	}
+	return nil
+}
+
+func createTrace(metrics []*model.Metric, dataGroup *model.DataGroup, adapter *LabelConverter, addrType AttrType) *AdaptedResult {
+	switch addrType {
+	case AttributeMap:
+		attrs, free := adapter.transform(dataGroup)
+		return &AdaptedResult{
+			ResultType:   Trace,
+			AttrsMap:     attrs,
+			Metrics:      metrics,
+			Timestamp:    dataGroup.Timestamp,
+			FreeAttrsMap: free,
+		}
+	case AttributeList:
+		attrs, free := adapter.convert(dataGroup)
+		return &AdaptedResult{
+			ResultType:    Trace,
 			AttrsList:     attrs,
 			Metrics:       metrics,
 			Timestamp:     dataGroup.Timestamp,
